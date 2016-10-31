@@ -352,10 +352,10 @@ func (t *SimpleChaincode) create_brokerageRequest(stub *shim.ChaincodeStub, json
 				},
 			})
 	
-	// err := stub.PutState(b.RequestID, bytesArray)
-	// if err != nil {
-	// 	fmt.Println("Error while updating record :: ");
-	// }
+	err := stub.PutState(b.RequestID, bytesArray)
+	if err != nil {
+		fmt.Println("Error while updating record :: ");
+	}
 	
 	returnDataInBytes, _ := json.Marshal(brokerageResponse)
 	return returnDataInBytes, nil
