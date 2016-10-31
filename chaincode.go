@@ -308,6 +308,8 @@ func (t *SimpleChaincode) authenticate(stub *shim.ChaincodeStub, args []string) 
 	var u User
 
 	username := args[0]
+	fmt.Println("Arguments username :: " + args[0])
+	fmt.Println("Arguments pwd :: " + args[1])
 
 	user, err := t.get_user(stub, username)
 
