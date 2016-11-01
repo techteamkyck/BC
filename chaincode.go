@@ -24,6 +24,8 @@ type ECertResponse struct {
 	OK string `json:"OK"`
 }
 
+
+
 type User struct {
 	UserId       string   `json:"userId"` //Same username as on certificate in CA
 	Salt         string   `json:"salt"`
@@ -40,15 +42,33 @@ type BrokerageRequest struct {
 	RequestID      			string   `json:"RequestID"` //Unique ID
 	Submitter         		string   `json:"Submitter"`
 	Approver         		string   `json:"Approver"`
-	Documents    			[]byte `json:"Documents"`
-	PersonalDetails    		[]byte `json:"PersonalDetails"`
-	KYCDetails       	  	[]byte `json:"KYCDetails"` //Array of thing IDs
+	Documents    			string `json:"Documents"`
+	PersonalDetails    		string `json:"PersonalDetails"`
+	KYCDetails       	  	string `json:"KYCDetails"` //Array of thing IDs
 	Status      			string   `json:"Status"`
-	DocValidationReport  	[]byte   `json:"DocValidationReport"`
-	FacialValidation 		[]byte   `json:"FacialValidation"`
-	Video					[]byte	 `json:"Video"`
-	TimeStamps				[]byte `json:"TimeStamps"`
+	DocValidationReport  	string   `json:"DocValidationReport"`
+	FacialValidation 		string   `json:"FacialValidation"`
+	Video					string	 `json:"Video"`
+	TimeStamps				string `json:"TimeStamps"`
 	Meeting 			    string `json:"Meeting"`
+	UpdateType              string `json:"UpdateType"`
+}
+
+type KyckUser struct {
+	UserId       string   `json:"userId"` //Same username as on certificate in CA
+	FirstName    string   `json:"firstName"`
+	LastName     string   `json:"lastName"`
+	Address      string   `json:"address"`
+	PhoneNumber  string   `json:"phoneNumber"`
+	EmailAddress string   `json:"emailAddress"`
+}
+
+type KyckBroker struct {
+	BrokerId       	string   `json:"BrokerId"` //Same username as on certificate in CA
+	Name     		string   `json:"Name"`
+	Address  		string   `json:"Address"`
+	Email    		[]string `json:"Email"`
+	Phone     		string   `json:"Phone"`
 }
 
 type BrokerageResponse struct {
@@ -57,7 +77,7 @@ type BrokerageResponse struct {
 
 type BrokerageRequestTimeStamp struct {
 	Submit 					string 
-	Meeting					string
+	MeetingConfirmation		string
 	FinalStatus				string
 
 }
@@ -112,11 +132,11 @@ func (t *SimpleChaincode) Invoke(stub *shim.ChaincodeStub, function string, args
 		return t.add_thing(stub, args)
 	}else if function == "add_resource"{
         return t.add_resource(stub, args)
-    }else if function == "saveApplication" {	//Create a new application
-		return t.create_brokerageRequest(stub, args[0])
+    }else if function == "create_brokerage_request" {	//Create a new application
+		return t.create_brokerage_request(stub, args[0])
 	}else if function == "update_brokerage_application" {
 		//updateType, jsonData, brokerageRequestId - input arguments
-		return t.update_brokerage_application(stub, args[0], args[1], args[2])
+		return t.update_brokerage_application(stub, args[0])
 	}
 
 	return nil, errors.New("Received unknown invoke function name")
@@ -139,6 +159,10 @@ func (t *SimpleChaincode) Query(stub *shim.ChaincodeStub, function string, args 
 		return t.authenticate(stub, args)
 	}else if function == "get_resource"{
         return t.get_resource(stub, args)
+    }else if function == "get_brokerage_request"{
+        return t.get_brokerage_request(stub, args[0])
+    }else if function == "get_all_brokerage_requests"{
+        return t.get_all_brokerage_requests(stub, args[0])
     }
 
 	return nil, errors.New("Received unknown query function name")
@@ -166,13 +190,6 @@ func main() {
 //  Init Function - Called when the user deploys the chaincode
 //==============================================================================================================================
 
-/*
-
-We shall maintain two separate tables 
- 1. For submitted Applications
- 2. For User related details.
- Eventually, both Table structure and the Single Key-Value pairs have the underlying hyperledger database.
-*/
 func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
 	var empty []string
 	jsonAsBytes, _ := json.Marshal(empty)								//marshal an empty array of strings to clear the index
@@ -196,22 +213,6 @@ func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args [
 			&shim.ColumnDefinition{Name: "TimeStamps"		    , Type:shim.ColumnDefinition_BYTES, 	Key:false},
 			&shim.ColumnDefinition{Name: "Meeting"		        , Type:shim.ColumnDefinition_STRING, 	Key:false},
 	})
-
-	err = stub.CreateTable("UserData", []*shim.ColumnDefinition{
-			&shim.ColumnDefinition{Name: "RequestID"			, Type:shim.ColumnDefinition_STRING,	Key: true},
-			&shim.ColumnDefinition{Name: "Submitter"			, Type:shim.ColumnDefinition_STRING,	Key:false},
-			&shim.ColumnDefinition{Name: "Approver"				, Type:shim.ColumnDefinition_STRING, 	Key:false},
-			&shim.ColumnDefinition{Name: "Documents"			, Type:shim.ColumnDefinition_BYTES, 	Key:false},
-			&shim.ColumnDefinition{Name: "PersonalDetails"		, Type:shim.ColumnDefinition_BYTES, 	Key:false},
-			&shim.ColumnDefinition{Name: "KYCDetails"			, Type:shim.ColumnDefinition_BYTES, 	Key:false},
-			&shim.ColumnDefinition{Name: "Status"				, Type:shim.ColumnDefinition_STRING, 	Key:false},
-			&shim.ColumnDefinition{Name: "DocValidationReport"	, Type:shim.ColumnDefinition_BYTES, 	Key:false},
-			&shim.ColumnDefinition{Name: "FacialValidation"		, Type:shim.ColumnDefinition_BYTES, 	Key:false},
-			&shim.ColumnDefinition{Name: "VideoRecording"		, Type:shim.ColumnDefinition_BYTES, 	Key:false},
-			&shim.ColumnDefinition{Name: "TimeStamps"		    , Type:shim.ColumnDefinition_BYTES, 	Key:false},
-			&shim.ColumnDefinition{Name: "Meeting"		        , Type:shim.ColumnDefinition_STRING, 	Key:false},
-	})
-
 	if err != nil{ return nil, errors.New( "Failed creating Brokerage Requests Table")}
 
 	return nil, nil
@@ -313,135 +314,121 @@ func (t *SimpleChaincode) add_thing(stub *shim.ChaincodeStub, args []string) ([]
 
 }
 
-func (t *SimpleChaincode) create_brokerageRequest(stub *shim.ChaincodeStub, jsonData string) ([]byte, error) {
+func (t *SimpleChaincode) create_brokerage_request(stub *shim.ChaincodeStub, jsonData string) ([]byte, error) {
 
 	fmt.Println("Input request object :: " + jsonData)
-	// Convert the incoming arguments into the structure object
 
+	/**** Convert the incoming arguments from json to bytearray ****/
 	var bytesArray = []byte(jsonData)
 
+	/**** Copy the incoming json data to a struct b ****/
 	var b BrokerageRequest;
 	json.Unmarshal(bytesArray, &b)
-
-	var brokerageResponse BrokerageResponse
-	brokerageResponse.status = "SUCCESS"
 	fmt.Println("B value :: " + b.RequestID)
-	// Create an object for inserting TimeStamps
-	var timeStampObject BrokerageRequestTimeStamp
-	timenow := time.Now()
-	fmt.Printf("Time.now %s", timenow)
-	//timenow.Format(time.RFC3339)
-	timeStampObject.Submit = timenow.UTC().Format(time.UnixDate);
-	timeStampJson, _ := json.Marshal(timeStampObject)
 
-	// Insert the details of the Brokerage application
+	/**** Create an object for inserting TimeStamps ****/
+	timeStampJson := []byte(t.get_current_time())
+
+	/****  Insert the details of the Brokerage application into a new row in the Table structure ****/
 	fmt.Println("Inserting row now")
-	stub.InsertRow( "BrokerageRequests" , shim.Row{
+	tx, err := stub.InsertRow( "BrokerageRequests" , shim.Row{
 				Columns: []*shim.Column{
 					&shim.Column{Value: &shim.Column_String_{String_: b.RequestID}},
 					&shim.Column{Value: &shim.Column_String_{String_: b.Submitter}},
 					&shim.Column{Value: &shim.Column_String_{String_: b.Approver}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: b.Documents}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: b.PersonalDetails}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: b.KYCDetails}},
+					&shim.Column{Value: &shim.Column_Bytes	{Bytes: []byte(b.Documents)}},
+					&shim.Column{Value: &shim.Column_Bytes	{Bytes: []byte(b.PersonalDetails)}},
+					&shim.Column{Value: &shim.Column_Bytes	{Bytes: []byte(b.KYCDetails)}},
 					&shim.Column{Value: &shim.Column_String_{String_: b.Status}},
-					&shim.Column{Value: &shim.Column_Bytes{Bytes: b.DocValidationReport}},
-					&shim.Column{Value: &shim.Column_String_{String_: ""}},
-					&shim.Column{Value: &shim.Column_String_{String_: ""}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: timeStampJson}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(b.DocValidationReport)}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(b.FacialValidation)}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(b.Video)}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(timeStampJson)}},
+					&shim.Column{Value: &shim.Column_String_{String_: b.Meeting}},
 				},
 			})
-	
-	err := stub.PutState(b.RequestID, bytesArray)
+	fmt.Println("ERROR :: " , err)
+
 	if err != nil {
-		fmt.Println("Error while updating record :: ");
+		fmt.Println("Error while updating record :: ", b.RequestID)
+	}else{
+		fmt.Println("Response from Insert Row ::", tx)
 	}
 	
-	returnDataInBytes, _ := json.Marshal(brokerageResponse)
-	return returnDataInBytes, nil
+	/*Returning nil response for now*/
+	return nil, nil
 }
 
-func (t *SimpleChaincode) update_brokerage_application(stub *shim.ChaincodeStub, updateType string, jsonData string, brokerageRequestId string) ([]byte, error) {
+func (t *SimpleChaincode) update_brokerage_application(stub *shim.ChaincodeStub, jsonData string) ([]byte, error) {
 
 	fmt.Println("Input request object :: " + jsonData)
 
-	/*New Data to be written*/
+	/****New Data to be written****/
 	var bytesArray = []byte(jsonData)
 
-	/*First get the data stored*/
-	brokerageRequestJson, _ := stub.GetState(brokerageRequestId)
+	var inputBrokerageRequest BrokerageRequest
 
-	/*Convert to local Struct here*/
-	var brokerageRequest BrokerageRequest
-	var jsonBytes = []byte(brokerageRequestJson)
-	json.Unmarshal(jsonBytes, &brokerageRequest)
+	fmt.Println("Unmarshalling data to BrokerageRequest")
+	json.Unmarshal(bytesArray, &inputBrokerageRequest)
+
+	/****First get the data stored****/
+	fmt.Println("Fetching data from table BrokerageRequests")
+	brokerageRequestRow := t.fetch_from_table(stub, inputBrokerageRequest.RequestID)
+
+	/****Convert to local Struct here****/
+	fmt.Println("Converting Row to Struct data from table BrokerageRequests")
+	brokerageRequest := t.getStructFromRow(brokerageRequestRow)	
 	
+	var timeStampJson []byte
+
+	updateType := inputBrokerageRequest.UpdateType
+
+	fmt.Println("UpdateType is :: " + updateType)
+
 	if updateType == "MEETING" {
-		brokerageRequest.Meeting = jsonData;
+		brokerageRequest.Meeting = jsonData
+		timeStampJson = []byte(t.get_current_time())
 	}else if updateType == "VIDEO" {
-		brokerageRequest.Video = bytesArray;
+		brokerageRequest.Video = jsonData
 	}else if updateType == "STATUS"{
-		brokerageRequest.Status = jsonData;
+		brokerageRequest.Status = jsonData
 	}
-	brokerageRequestUpdatedJson,_ := json.Marshal(brokerageRequest)
-
-	timeStampJson := []byte(t.get_current_time())
-
-	/*Store the data*/
-	err := stub.PutState(brokerageRequest.RequestID, brokerageRequestUpdatedJson)
-	if err == nil {
-		stub.ReplaceRow( "BrokerageRequests" , shim.Row{
+	
+	fmt.Println("Replacing row now...")
+	/**** Store the data ****/
+		tx,err := stub.ReplaceRow( "BrokerageRequests" , shim.Row{
 				Columns: []*shim.Column{
 					&shim.Column{Value: &shim.Column_String_{String_: brokerageRequest.RequestID}},
 					&shim.Column{Value: &shim.Column_String_{String_: brokerageRequest.Submitter}},
 					&shim.Column{Value: &shim.Column_String_{String_: brokerageRequest.Approver}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: brokerageRequest.Documents}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: brokerageRequest.PersonalDetails}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: brokerageRequest.KYCDetails}},
+					&shim.Column{Value: &shim.Column_Bytes	{Bytes: []byte(brokerageRequest.Documents)}},
+					&shim.Column{Value: &shim.Column_Bytes	{Bytes: []byte(brokerageRequest.PersonalDetails)}},
+					&shim.Column{Value: &shim.Column_Bytes	{Bytes: []byte(brokerageRequest.KYCDetails)}},
 					&shim.Column{Value: &shim.Column_String_{String_: brokerageRequest.Status}},
-					&shim.Column{Value: &shim.Column_Bytes{Bytes: brokerageRequest.DocValidationReport}},
-					&shim.Column{Value: &shim.Column_String_{String_: ""}},
-					&shim.Column{Value: &shim.Column_Bytes{Bytes: brokerageRequest.Video}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: timeStampJson}},
-					&shim.Column{Value: &shim.Column_String_	{String_: brokerageRequest.Meeting}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(brokerageRequest.DocValidationReport)}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(brokerageRequest.FacialValidation)}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(brokerageRequest.Video)}},
+					&shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(timeStampJson)}},
+					&shim.Column{Value: &shim.Column_String_{String_: brokerageRequest.Meeting}},
 				},
 		})
-	}
+		fmt.Println("Error ::: ",err)
 
-	/*var b BrokerageRequest;
-	json.Unmarshal(bytesArray, &b)
-
-	var brokerageResponse BrokerageResponse
-	brokerageResponse.status = "SUCCESS"
-	fmt.Println("B value :: " + brokerageRequestId)
-	// Create an object for inserting TimeStamps
-	var timeStampObject BrokerageRequestTimeStamps
-	timenow := time.Now()
-	fmt.Printf("Time.now %s", timenow)
-	//timenow.Format(time.RFC3339)
-	timeStampObject.Submit = timenow.UTC().Format(time.UnixDate);
-	timeStampJson := json.Marshal(timeStampObject)
-
-	// Insert the details of the Brokerage application
-	fmt.Println("Inserting row now")
-	stub.ReplaceRow( "BrokerageRequests" , shim.Row{
-				Columns: []*shim.Column{
-					&shim.Column{Value: &shim.Column_String_{String_: b.RequestID}},
-					&shim.Column{Value: &shim.Column_String_{String_: b.Submitter}},
-					&shim.Column{Value: &shim.Column_String_{String_: b.Approver}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: b.Documents}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: b.PersonalDetails}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: b.KYCDetails}},
-					&shim.Column{Value: &shim.Column_String_{String_: b.Status}},
-					&shim.Column{Value: &shim.Column_String_{String_: b.DocValidationReport}},
-					&shim.Column{Value: &shim.Column_String_{String_: ""}},
-					&shim.Column{Value: &shim.Column_String_{String_: ""}},
-					&shim.Column{Value: &shim.Column_Bytes	{Bytes: timeStampJson}},
-				},
-	})*/
+		if err != nil {
+			fmt.Println("Error while updating record :: ", brokerageRequest.RequestID)
+		}else{
+			fmt.Println("Response from Insert Row ::", tx)
+		}
 	
-	return []byte("SUCCESS"), nil
+	return timeStampJson, nil
 }
+
+func (t *SimpleChaincode) toJson()(string){
+	var returnValue string;
+	
+	return returnValue
+}
+
 func (t *SimpleChaincode) get_current_time() ([]byte) {
 	var timeStampObject BrokerageRequestTimeStamp
 	timenow := time.Now()
@@ -452,24 +439,67 @@ func (t *SimpleChaincode) get_current_time() ([]byte) {
 	return timeStampJson
 }
 
+
+
+/*
+	Return the struct from the table.
+*/
+func(t *SimpleChaincode) getStructFromRow(row shim.Row)(BrokerageRequest){
+	
+	var brokerageRequest BrokerageRequest
+	for index := range row.Columns {
+		column := row.Columns[index]
+		if index == 0 {
+			brokerageRequest.RequestID = column.GetString_()
+		}else if index == 1 {
+			brokerageRequest.Submitter = column.GetString_()
+		}else if index == 2 {
+			brokerageRequest.Approver = column.GetString_()
+		}else if index == 3 {
+			brokerageRequest.Documents = column.GetString_()
+		}else if index == 4 {
+			brokerageRequest.PersonalDetails = column.GetString_()
+		}else if index == 5 {
+			brokerageRequest.KYCDetails = column.GetString_()
+		}else if index == 6 {
+			brokerageRequest.Status = column.GetString_()
+		}else if index == 7 {
+			brokerageRequest.DocValidationReport = column.GetString_()
+		}else if index == 8 {
+			brokerageRequest.FacialValidation = column.GetString_()
+		}else if index == 9 {
+			brokerageRequest.Video = column.GetString_()
+		}else if index == 10 {
+			brokerageRequest.TimeStamps = column.GetString_()
+		}else if index == 11 {
+			brokerageRequest.Meeting = column.GetString_()
+		}
+		index ++
+	}
+	return brokerageRequest
+}
+
 /*This function helps in getting the data stored from local database*/
-func (t *SimpleChaincode) fetch_from_table(stub *shim.ChaincodeStub, b BrokerageRequest){
+func (t *SimpleChaincode) fetch_from_table(stub *shim.ChaincodeStub, requestId string)(shim.Row){
+	fmt.Println("Fetching Row for RequestID :: " + requestId)
 	var columns []shim.Column
 	row := shim.Row{
 		Columns: []*shim.Column{
-					&shim.Column{Value: &shim.Column_String_{String_: b.RequestID}},
-					&shim.Column{Value: &shim.Column_String_{String_: b.Submitter}},
+					&shim.Column{Value: &shim.Column_String_{String_: requestId}},
+					//&shim.Column{Value: &shim.Column_String_{String_: submitter}},
 		},
 	}
-	queryCol := shim.Column{Value: &shim.Column_String_{String_: b.RequestID}}
+	queryCol := shim.Column{Value: &shim.Column_String_{String_: requestId}}
 	columns = append(columns, queryCol)
 	row.Columns[0].GetString_()
-	row.Columns[1].GetString_()
+	//row.Columns[1].GetString_()
 	row, _ = stub.GetRow("BrokerageRequests", columns)
+	fmt.Println("ROW :: ", row)
 	uid:= row.Columns[0].GetString_()
 	submitter := row.Columns[1].GetString_()
 	fmt.Println("UID is " + uid)
 	fmt.Println("Submitter is" + submitter)
+	return row
 }
 
 
@@ -603,4 +633,20 @@ func (t *SimpleChaincode) get_resource(stub *shim.ChaincodeStub, args []string) 
     return path, nil
 
     
+}
+
+func (t *SimpleChaincode) get_brokerage_request(stub *shim.ChaincodeStub, requestId string) ([]byte, error) {
+ 	fmt.Println("Chaincode running get_brokerage_request()")
+	 row := t.fetch_from_table(stub, requestId)
+	 structure := t.getStructFromRow(row)
+	 bytesArray,_ := json.Marshal(structure)
+	 return bytesArray,nil
+}
+
+func (t *SimpleChaincode) get_all_brokerage_requests(stub *shim.ChaincodeStub, requestId string) ([]byte, error) {
+ 	fmt.Println("Chaincode running get_brokerage_request()")
+	 row := t.fetch_from_table(stub, requestId)
+	 structure := t.getStructFromRow(row)
+	 bytesArray,_ := json.Marshal(structure)
+	 return bytesArray,nil
 }
