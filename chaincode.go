@@ -60,16 +60,24 @@ type KyckUser struct {
 	LastName     string   `json:"lastName"`
 	Address      string   `json:"address"`
 	PhoneNumber  string   `json:"phoneNumber"`
-	EmailAddress string   `json:"emailAddress"`
+	Documents    			[]byte 	`json:"Documents"`
+	PersonalDetails    		[]byte 	`json:"PersonalDetails"`
+	KYCDetails       	  	[]byte 	`json:"KYCDetails"` 
+	DocValidationReport  	[]byte  `json:"DocValidationReport"`
+	TimeStamp   			string
+	userType				string
+	Rights					[]byte
 }
-
-type KyckBroker struct {
-	BrokerId       	string   `json:"BrokerId"` //Same username as on certificate in CA
+/**** Accessor can be Broker, Govt agency, Regulator, etc ****/
+type KyckAccessor struct {
+	AccessorId      string   `json:"AccessorId"` //Same username as on certificate in CA
 	Name     		string   `json:"Name"`
 	Address  		string   `json:"Address"`
 	Email    		[]string `json:"Email"`
 	Phone     		string   `json:"Phone"`
+	userType		string
 }
+
 
 type BrokerageResponse struct {
 	status string	 
